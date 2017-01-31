@@ -43,6 +43,7 @@
 #include <comma/visiting/traits.h>
 #include "../../../../timing/clocked_time_stamp.h"
 #include "../hdl64/stream.h"
+#include "../hdl32/stream.h"
 #include "../impl/pcap_reader.h"
 #include "../impl/proprietary_reader.h"
 #include "../impl/thin_reader.h"
@@ -110,6 +111,7 @@ static void usage( bool )
     std::cerr << "    --proprietary,-q : read velodyne data directly from stdin using the proprietary protocol" << std::endl;
     std::cerr << "        <header, 16 bytes><timestamp, 12 bytes><packet, 1206 bytes><footer, 4 bytes>" << std::endl;
     std::cerr << "    --puck : velodyne puck data" << std::endl;
+    std::cerr << "    --hdl32 : velodyne hdl32 data" << std::endl;
     std::cerr << "    default input format: <timestamp, 8 bytes><packet, 1206 bytes>" << std::endl;
     std::cerr << std::endl;
     std::cerr << "output options:" << std::endl;
@@ -280,6 +282,15 @@ int main( int ac, char** av )
             else if( options.exists( "--udp-port" ) ) { s = new snark::velodyne::puck::stream< snark::udp_reader >( new snark::udp_reader( options.value< unsigned short >( "--udp-port" ) ), outputInvalidpoints ); }
             else if( options.exists( "--proprietary,-q" ) ) { s = new snark::velodyne::puck::stream< snark::proprietary_reader >( new snark::proprietary_reader, outputInvalidpoints ); }
             else { s = new snark::velodyne::puck::stream< snark::stream_reader >( new snark::stream_reader, outputInvalidpoints ); }
+        }
+	else if( options.exists( "--hdl32" ) )
+	{
+            calculator = new snark::velodyne::db_calculator( db );
+            if( options.exists( "--pcap" ) ) { s = new snark::velodyne::hdl32::stream< snark::pcap_reader >( new snark::pcap_reader, outputInvalidpoints, legacy ); }
+            else if( options.exists( "--thin" ) ) { s = new snark::velodyne::hdl32::stream< snark::thin_reader >( new snark::thin_reader, outputInvalidpoints, legacy ); }
+            else if( options.exists( "--udp-port" ) ) { s = new snark::velodyne::hdl32::stream< snark::udp_reader >( new snark::udp_reader( options.value< unsigned short >( "--udp-port" ) ), outputInvalidpoints, legacy ); }
+            else if( options.exists( "--proprietary,-q" ) ) { s = new snark::velodyne::hdl32::stream< snark::proprietary_reader >( new snark::proprietary_reader, outputInvalidpoints, legacy ); }
+            else { s = new snark::velodyne::hdl32::stream< snark::stream_reader >( new snark::stream_reader, outputInvalidpoints, legacy ); }
         }
         else
         {

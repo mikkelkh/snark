@@ -69,3 +69,5 @@ IF( snark_build_math_geometry )
 ENDIF( snark_build_math_geometry )
 
 ADD_SUBDIRECTORY( detail )
+
+ADD_SUBDIRECTORY( mikkel )

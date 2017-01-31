@@ -34,11 +34,11 @@
 #pragma once
 
 #include <boost/date_time/posix_time/posix_time.hpp>
-#include "../db.h"
+#include "db.h"
 #include "../laser_return.h"
 #include "../packet.h"
 
-namespace snark {  namespace velodyne { namespace impl {
+namespace snark {  namespace velodyne { namespace hdl32 {
 
 laser_return get_laser_return( const packet& packet
                              , unsigned int block
@@ -50,6 +50,6 @@ laser_return get_laser_return( const packet& packet
 double azimuth( double rotation, unsigned int laser, double angularSpeed );
 double time_span(bool legacy = true);   //return time span between block 11 and block 0 (laser id 0) in seconds
 
-} } } // namespace snark {  namespace velodyne { namespace impl {
+} } } // namespace snark {  namespace velodyne { namespace hdl32 {
 
 //#endif // SNARK_SENSORS_VELODYNE_IMPL_GETFROMLASERRETURN_H_
