@@ -36,11 +36,13 @@
 #include <comma/csv/stream.h>
 #include <comma/io/stream.h>
 #include <comma/io/publisher.h>
+#include <opencv2/imgproc/imgproc.hpp>
 #include "../../../../imaging/cv_mat/serialization.h"
 #include "../realsense.h"
 #include "../traits.h"
 #include "../../../../visiting/eigen.h"
 #include <sstream>
+#include <fstream>
 
 using namespace snark::realsense;
 comma::signal_flag signaled;
@@ -104,6 +106,11 @@ void usage(bool detail)
     std::cerr << "        <param>:"<<std::endl;
     device_t::help(std::cerr,"            ");
     std::cerr << "    --list,--list-devices: output available devices and exit, csv fields: "<<list::field_names()<< std::endl;
+    std::cerr << "    --log=<directory>;period=<seconds>[;index]: log points to file" << std::endl;
+    std::cerr << "        <directory>: write logs to this directory" << std::endl;
+    std::cerr << "        period=<seconds>: period after which to start a new log file" << std::endl;
+    std::cerr << "        index: write index file containing timestamp,file_number,file_offset for each frame" << std::endl;
+    std::cerr << "    --output-image-from-points: instead of points data, output the camera stream to stdout" << std::endl;
     std::cerr << "    --verbose,-v: show detailed messages" << std::endl;
     std::cerr << "    --options,--camera-options=<options>: set options for all devices, <options> is a comma serparated list of <option_name>=<value>"<<std::endl;
     std::cerr << "    --list-options: list device options and exit"<<std::endl;
@@ -166,7 +173,6 @@ struct writer
     void write(const T& t);
 };
 
-
 struct points_t
 {
     struct output_t
@@ -189,12 +195,107 @@ struct points_t
     ::writer<output_t> writer;
     
     points_t(device_t& device,bool has_color,const comma::csv::options& csv);
-    void scan(unsigned block);
+    void scan(unsigned block, bool output_image);
     //process points cloud
-    static void process(std::vector<device_t>& devices,const comma::csv::options& csv);
+    static void process(std::vector<device_t>& devices,const comma::csv::options& csv, bool output_image);
     static void output_format();
     static void output_fields();
 };
+
+struct logger
+{
+        
+    comma::csv::options csv_;
+    std::string directory_;
+    boost::scoped_ptr< std::ofstream > filestream;
+    boost::scoped_ptr< comma::csv::output_stream < points_t::output_t > > csv_stream;
+    boost::posix_time::time_duration period_;
+    boost::posix_time::ptime start_;
+    
+    struct indexer
+    {
+        boost::posix_time::ptime t;
+        comma::uint16 file;
+        comma::uint64 offset;
+        boost::scoped_ptr< std::ofstream > filestream;
+        boost::scoped_ptr< comma::csv::binary_output_stream< indexer > > csv_stream;
+        
+        indexer() : file( 0 ), offset( 0 ) {}
+        
+        indexer( bool enabled, const std::string& directory ) : file ( 0 ), offset( 0 )
+        {
+            if( !enabled ) { return; }
+            std::string index_file = directory + "/index.bin";
+            filestream.reset( new std::ofstream( &index_file[0] ) );
+            if( !filestream->is_open() ) { COMMA_THROW( comma::exception, "failed to open \"" << index_file << "\"" ); }
+            csv_stream.reset( new comma::csv::binary_output_stream< indexer >( *filestream ) );
+        }
+        
+        ~indexer() { if ( filestream ) { filestream->close(); } }
+        
+        void increment_file() { ++file; offset = 0; }
+        
+        void write_block( const boost::posix_time::ptime& timestamp, std::size_t num_records )
+        {
+            t = timestamp;
+            if( csv_stream ) 
+            { 
+                csv_stream->write( *this );
+                csv_stream->flush(); 
+            }
+            offset += num_records * comma::csv::format(comma::csv::format::value<points_t::output_t>()).size();
+        }
+    };
+    
+    indexer index_;
+    
+    logger() : directory_("") {}
+    
+    logger( const comma::csv::options& csv, const std::string& directory, const boost::posix_time::time_duration& period, bool index ) : csv_(csv), directory_( directory ), period_( period ), index_(index, directory)
+    { }
+    //logger( const comma::csv::options& csv, const std::string& directory, unsigned int size, bool index ) : directory_( directory ), csv_(csv), size_( size ), count_( 0 ), index_(index, directory) { }
+    
+    ~logger() { if ( filestream ) { filestream->close(); } }
+    
+    void update_on_time_( const boost::posix_time::ptime& t )
+    {
+        if( start_.is_not_a_date_time() ) { start_ = t; return; }
+        if( ( t - start_ ) < period_ ) { return; }
+        start_ = t;
+        csv_stream.reset();
+        filestream->close();
+        filestream.reset();
+        index_.increment_file();
+    }
+    
+    void write( const points_t::output_t& t )
+    {
+        if ( directory_.empty() ) { return; } // no logging directory
+        //         update_on_size_();
+        update_on_time_( t.t );
+        if( !filestream )
+        {
+            std::string filename = directory_ + '/' + boost::posix_time::to_iso_string( t.t ) + ( csv_.binary() ? ".bin" : ".csv" );
+            filestream.reset( new std::ofstream( &filename[0] ) );
+            if( !filestream->is_open() ) { COMMA_THROW( comma::exception, "failed to open \"" << filename << "\"" ); }
+            csv_stream.reset( new comma::csv::output_stream<points_t::output_t>( *filestream, csv_ ) );
+        }
+        csv_stream->write(t);
+        csv_stream->flush();
+    }
+    
+//     void update_on_size_()
+//     {
+//         if( size_ == 0 ) { return; }
+//         if( count_ < size_ ) { ++count_; return; }
+//         count_ = 1;
+//         filestream->close();
+//         filestream.reset();
+//         index_.increment_file();
+//     }
+};
+
+boost::scoped_ptr<logger> logging;
 
 namespace comma { namespace visiting {
     
@@ -232,6 +333,23 @@ template <> struct traits< points_t::output_t >
     }
 };
 
+template <> struct traits< logger::indexer >
+{
+    template < typename K, typename V > static void visit( const K&, const logger::indexer& t, V& v )
+    {
+        v.apply( "t", t.t );
+        v.apply( "file", t.file );
+        v.apply( "offset", t.offset );
+    }
+
+    template < typename K, typename V > static void visit( const K&, logger::indexer& t, V& v )
+    {
+        v.apply( "t", t.t );
+        v.apply( "file", t.file );
+        v.apply( "offset", t.offset );
+    }
+};
+
 } } // namespace comma { namespace visiting {
 
 struct camera_stream
@@ -248,13 +366,14 @@ struct camera_stream
         {
             if(!device.is_streaming()) { COMMA_THROW(comma::exception, "device not streaming" ); }
             device.wait_for_frames();
+            // todo: instead of using image_args, get device format and then convert to BGR
             serializer.write(std::cout,stream.get_frame());
         }
         comma::verbose<<"signaled!"<<std::endl;
     }
 };
 
-void points_t::process(std::vector<device_t>& devices,const comma::csv::options& csv)
+void points_t::process(std::vector<device_t>& devices,const comma::csv::options& csv, bool output_image = false)
 {
     comma::verbose<<"points_t::process"<<std::endl;
     bool has_color=csv.fields.empty() || csv.has_some_of_fields("color,color/r,color/g,color/b");
@@ -273,7 +392,7 @@ void points_t::process(std::vector<device_t>& devices,const comma::csv::options&
         run_stream runner(*devices[0].device);
         for(unsigned block=0;!signaled;block++)
         {
-            all[0]->scan(block);
+            all[0]->scan(block, output_image);
         }
     }
     else
@@ -284,7 +403,7 @@ void points_t::process(std::vector<device_t>& devices,const comma::csv::options&
             for(unsigned i=0;i<all.size()&&!signaled;i++)
             {
                 run_stream runner(*devices[i].device);
-                all[i]->scan(block++);
+                all[i]->scan(block++, output_image);
             }
         }
     }
@@ -322,7 +441,8 @@ points_t::points_t(device_t& dev,bool has_color, const comma::csv::options& csv)
     points_cloud.init(image_args, has_color ? rs::stream::color : rs::stream::depth);
     comma::verbose<<"points_t(has_color: "<<has_color<<") done "<<std::endl;
 }
-void points_t::scan(unsigned block)
+
+void points_t::scan(unsigned block, bool output_image = false)
 {
     if(!device.is_streaming()) { COMMA_THROW(comma::exception, "device not streaming" ); }
     device.wait_for_frames();
@@ -333,8 +453,9 @@ void points_t::scan(unsigned block)
     out.block=block;
     std::pair<boost::posix_time::ptime,cv::Mat> pair;
     if(has_color) { pair=color.get_frame(); }
-    cv::Mat& mat=pair.second;
+    const cv::Mat& mat=pair.second;
     rs::float3 point;
+    std::size_t num_output = 0;
     for(unsigned index=0;index<points_cloud.count();index++)
     {
         bool discard=false;
@@ -357,8 +478,22 @@ void points_t::scan(unsigned block)
                     out.color.set(mat.ptr(cy,cx));
                 }
             }
-            if(!discard) {writer.write(out);}
+            if(!discard)
+            {
+                if (logging) { logging->write(out); }
+                if ( !output_image ) { writer.write(out); }
+                num_output++;
+            }
         }
+    }
+    if (logging) { logging->index_.write_block(out.t, num_output); }
+    if (output_image) 
+    { 
+        snark::cv_mat::serialization::options opt;
+        snark::cv_mat::serialization serializer(opt);
+        // image is always RGB in points mode, convert to BGR so the output image is consistent with cv-cat
+        cv::cvtColor(pair.second, pair.second, CV_RGB2BGR); 
+        serializer.write(std::cout,pair) ;
     }
 }
 
@@ -585,6 +720,32 @@ int main( int argc, char** argv )
             points_t::output_fields();
             return 0;       
         }
+        if (options.exists("--log"))
+        {
+            std::string args = options.value<std::string>("--log");
+            std::vector <std::string> v = comma::split(args, ';');
+            std::string directory = v[0];
+            if (directory.empty() ) { COMMA_THROW(comma::exception, "please specify --log=directory"); }
+            bool index = false;
+            boost::optional <boost::posix_time::time_duration> time_duration;
+            for (unsigned opt = 1; opt < v.size(); ++opt )
+            {
+                std::vector < std::string > w = comma::split(v[opt], '=');
+                if ( w[0] == "index" ) 
+                { 
+                    index = true; 
+                }
+                else if ( w[0] == "period" )
+                {
+                    if (w.size() != 2 ) { COMMA_THROW(comma::exception, "please specify period=<seconds>"); }
+                    double period = boost::lexical_cast< double >( w[1] );
+                    comma::uint32 seconds = static_cast<int>(period);
+                    time_duration = boost::posix_time::seconds( seconds ) + boost::posix_time::microseconds( ( period - seconds ) * 1000000 );
+                }
+            }
+            if (!time_duration) { COMMA_THROW(comma::exception, "please specify period=<seconds>"); }
+            logging.reset(new logger(csv, directory, *time_duration, index));
+        }
         //
         rs::context context;
         if(do_list) { list::process(context,csv); return 0; }
@@ -641,7 +802,7 @@ int main( int argc, char** argv )
         }
         else
         {
-            points_t::process(selected,csv);
+            points_t::process(selected,csv, options.exists("--output-image-from-points"));
         }
         return 0;
     }

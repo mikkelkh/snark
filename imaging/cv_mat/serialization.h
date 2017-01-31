@@ -61,6 +61,8 @@ class serialization
         struct options
         {
             std::string fields;
+            comma::csv::format format;
+            
             comma::uint32 rows;
             comma::uint32 cols;
             std::string type;
@@ -72,6 +74,7 @@ class serialization
             static std::string usage();
             static std::string type_usage();
         };
+        
 
         /// default constructor
         serialization();
@@ -94,7 +97,7 @@ class serialization
         
         /// deserialize header only
         header get_header( const char* buf ) const;
-
+        
         /// return usage
         static const std::string& usage();
 
@@ -106,6 +109,9 @@ class serialization
 
         /// read from stream, if eof, return empty cv::Mat
         std::pair< boost::posix_time::ptime, cv::Mat > read( std::istream& is );
+        
+        /// return last header buffer after read()
+        const char* header_buffer() const; // todo
 
         /// write to stream
         void write( std::ostream& os, const std::pair< boost::posix_time::ptime, cv::Mat >& m, bool flush = true );
@@ -155,6 +161,9 @@ template <> struct traits< snark::cv_mat::serialization::options >
     static void visit( const K&, snark::cv_mat::serialization::options& h, V& v )
     {
         v.apply( "fields", h.fields );
+        std::string s = h.format.string();
+        v.apply( "binary", s );
+        h.format = comma::csv::format(s);
         v.apply( "rows", h.rows );
         v.apply( "cols", h.cols );
         v.apply( "type", h.type );
@@ -166,6 +175,7 @@ template <> struct traits< snark::cv_mat::serialization::options >
     static void visit( const K&, const snark::cv_mat::serialization::options& h, V& v )
     {
         v.apply( "fields", h.fields );
+        v.apply( "binary", h.format.string() );
         v.apply( "rows", h.rows );
         v.apply( "cols", h.cols );
         v.apply( "type", h.type );

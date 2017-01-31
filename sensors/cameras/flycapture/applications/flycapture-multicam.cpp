@@ -59,10 +59,12 @@ int main( int argc, char** argv )
         unsigned int discard;
         boost::program_options::options_description description( "options" );
         std::vector<snark::cameras::flycapture::camera::multicam::camera_pair> cameras;
+        std::string use_software_trigger_option;
 
         description.add_options()
             ( "help,h", "display help message" )
             ( "camera", boost::program_options::value< std::vector<std::string> >(), "a camera_string specifying the serial to connect to as well as any attributes to set" )
+            ( "trigger", boost::program_options::value< std::string >( &use_software_trigger_option )->default_value( "software" ), "sets trigger type software|hardware" )
             ( "fields,f", boost::program_options::value< std::string >( &fields )->default_value( "t,rows,cols,type" ), "header fields, possible values: t,rows,cols,type,size" )
             ( "list-cameras", "list all cameras and exit" )
             ( "list-attributes", "output current camera attributes" )
@@ -141,6 +143,14 @@ int main( int argc, char** argv )
             }
             cameras.push_back( std::make_pair(serial, attributes) );
         }
+
+        if( use_software_trigger_option != "software" && use_software_trigger_option != "hardware" )
+        {
+            std::cerr << "expected --trigger set as hardware or software, got " << use_software_trigger_option << std::endl;
+            exit( 1 );
+        }
+        bool use_software_trigger;
+        use_software_trigger_option == "hardware" ? use_software_trigger = false : use_software_trigger = true;
         
         if ( vm.count( "discard" ) ) { discard = 1; }
         discard_more_than = discard;
@@ -166,7 +176,7 @@ int main( int argc, char** argv )
         // Initialise output image, assumes all images of same type
         {
             int rows = 0, cols = 0, type = 0;
-            for (auto& frame : multicam->read().second)
+            for (auto& frame : multicam->read( use_software_trigger ).second)
             {
                 rows += frame.rows;
                 cols = std::max(cols, frame.cols);
@@ -179,7 +189,7 @@ int main( int argc, char** argv )
 
         while( !is_shutdown && running )
         {
-            auto frames_pair = multicam->read();
+            auto frames_pair = multicam->read( use_software_trigger );
             int y = 0;
             for (uint camera_number = 0; camera_number < frames_pair.second.size(); ++camera_number)
             {

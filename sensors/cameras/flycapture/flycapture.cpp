@@ -68,6 +68,7 @@ namespace snark{ namespace cameras{ namespace flycapture{
         }
         else if( result == FlyCapture2::PGRERROR_IMAGE_CONSISTENCY_ERROR )
         {
+            // todo: no output to stderr in libraries!
 //report damaged frame and try again
             std::cerr << "snark_flycapture error: " << result.GetDescription() << ". Retrying..." << std::endl;
             return false; 
@@ -76,6 +77,7 @@ namespace snark{ namespace cameras{ namespace flycapture{
             || ( result == FlyCapture2::PGRERROR_ISOCH_ALREADY_STARTED )
             || ( result == FlyCapture2::PGRERROR_ISOCH_NOT_STARTED ) )
         {
+            // todo: no output to stderr in libraries!
 //These are errors that result in a retry
             std::cerr << "snark_flycapture error: " << result.GetDescription() << ". Restarting camera." << std::endl;
             handle->StopCapture();
@@ -351,14 +353,18 @@ namespace snark{ namespace cameras{ namespace flycapture{
             }
         }
 
-        camera::multicam::frames_pair read()
+        camera::multicam::frames_pair read( bool use_software_trigger )
         {
             if (!good) { COMMA_THROW(comma::exception, "multicam read without good cameras"); }
             camera::multicam::frames_pair image_tuple;
-            boost::posix_time::ptime begin = boost::posix_time::microsec_clock::universal_time();
-            trigger();
-            boost::posix_time::ptime end = boost::posix_time::microsec_clock::universal_time();
-            image_tuple.first = midpoint(begin, end);
+            boost::posix_time::ptime timestamp = boost::posix_time::microsec_clock::universal_time();
+            if( use_software_trigger )
+            {
+                trigger();
+                boost::posix_time::ptime end = boost::posix_time::microsec_clock::universal_time();
+                timestamp = midpoint(timestamp, end);
+            }
+            image_tuple.first = timestamp;
             for (auto& camera : cameras_)
             {
                 const auto pair = camera->read();
@@ -410,8 +416,8 @@ namespace snark{ namespace cameras{ namespace flycapture{
         void camera::multicam::trigger()
         { pimpl_->trigger(); }
 
-        camera::multicam::frames_pair camera::multicam::read()
-        { return pimpl_->read(); }
+        camera::multicam::frames_pair camera::multicam::read( bool use_software_trigger )
+        { return pimpl_->read( use_software_trigger ); }
 
 } } } //namespace snark{ namespace cameras{ namespace flycapture{
 
