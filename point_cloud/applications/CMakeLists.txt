@@ -70,8 +70,6 @@ IF( snark_build_math_geometry )
     ENDIF( NOT WIN32 )
 ENDIF( snark_build_math_geometry )
 
-ADD_SUBDIRECTORY( detail )
-
 ADD_SUBDIRECTORY( points-calc )
 
 ADD_SUBDIRECTORY( mikkel )
