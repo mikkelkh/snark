@@ -105,7 +105,7 @@ boost::posix_time::time_duration time_offset( unsigned int block, unsigned int l
 
 double azimuth( double rotation, unsigned int laser, double angularSpeed )
 {
-std::cerr<<"rot="<<angularSpeed<<std::endl;
+//std::cerr<<"rot="<<angularSpeed<<std::endl;
     double a = rotation + angularSpeed * timestamps::step * laser + 90; // add 90 degrees for our system of coordinates (although this value is only output for later processing - can keep its own)
     if( comma::math::less( a, 360 ) ) { if( comma::math::less( a, 0 ) ) { a += 360; } }
     else { a -= 360; }
